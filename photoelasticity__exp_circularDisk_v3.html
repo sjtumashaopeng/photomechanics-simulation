@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>光弹性模拟 - 对径受压圆盘</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; overflow: hidden; background: #1a1a2e; }
+        #canvas-container { width: 100vw; height: 100vh; position: relative; }
+
+        .instructions-panel {
+            position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
+            width: 260px; background: rgba(255,255,255,0.92);
+            padding: 14px 12px; border-radius: 10px;
+            box-shadow: 0 6px 24px rgba(0,0,0,0.25);
+            font-size: 0.78em; color: #444; line-height: 1.6;
+        }
+        .instructions-panel h3 {
+            font-size: 0.9em; color: #333; margin-bottom: 8px;
+            border-bottom: 1px solid #ddd; padding-bottom: 6px;
+        }
+        .instructions-panel ol { margin: 0; padding-left: 16px; }
+        .instructions-panel li { margin-bottom: 6px; white-space: nowrap; }
+
+        .controls-panel {
+            position: absolute; top: 16px; right: 16px; width: 270px;
+            background: rgba(255,255,255,0.95); padding: 14px 16px;
+            border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        h1 { font-size: 1.05em; color: #333; margin-bottom: 2px; text-align: center; }
+        .subtitle { color: #666; font-size: 0.72em; margin-bottom: 10px; text-align: center; }
+        .control-group { margin-bottom: 8px; }
+        .control-group label { display: block; font-weight: 600; margin-bottom: 3px; color: #333; font-size: 0.78em; }
+        input[type="range"] { width: 100%; height: 6px; border-radius: 3px; background: linear-gradient(90deg, #667eea, #764ba2); outline: none; -webkit-appearance: none; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: white; border: 2px solid #667eea; cursor: pointer; }
+        .value-display { text-align: right; font-size: 0.85em; color: #667eea; font-weight: bold; margin-top: 1px; }
+        .mode-toggle { display: flex; gap: 6px; margin-bottom: 10px; }
+        .mode-btn { flex: 1; padding: 5px 2px; border: 2px solid #ddd; border-radius: 6px; cursor: pointer; font-weight: 600; background: white; font-size: 0.72em; line-height: 1.3; }
+        .mode-btn.active { background: #667eea; color: white; border-color: #667eea; }
+        .stats { background: #f8f9fa; padding: 8px 10px; border-radius: 6px; margin-top: 8px; font-size: 0.78em; }
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 3px; }
+        .stat-label { color: #666; }
+        .stat-value { color: #667eea; font-weight: bold; }
+        .copyright { margin-top: 10px; padding-top: 8px; border-top: 1px solid #ddd; text-align: center; font-size: 0.7em; color: #666; line-height: 1.5; }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+
+    <div class="instructions-panel">
+        <h3>操作说明</h3>
+        <ol>
+            <li>鼠标滚轮可放大、缩小画面</li>
+            <li>按住鼠标左键拖动可调整圆盘方位</li>
+            <li>其他操作在右边面板，一看即懂</li>
+        </ol>
+    </div>
+
+    <div class="controls-panel">
+        <h1>光弹性模拟</h1>
+        <p class="subtitle">对径受压圆盘</p>
+        <div class="mode-toggle" id="polarToggle">
+            <button class="mode-btn active" data-polar="circular">圆偏振</button>
+            <button class="mode-btn" data-polar="plane">平面偏振</button>
+        </div>
+        <div class="mode-toggle">
+            <button class="mode-btn active" id="monoBtn">单色光</button>
+            <button class="mode-btn" id="whiteBtn">白光</button>
+        </div>
+        <div class="mode-toggle">
+            <button class="mode-btn active" id="darkBtn">暗场</button>
+            <button class="mode-btn" id="brightBtn">亮场</button>
+        </div>
+        <div class="control-group">
+            <label>载荷 Load (P)</label>
+            <input type="range" id="loadSlider" min="0" max="2000" value="1000" step="10">
+            <div class="value-display" id="loadValue">1000 N</div>
+        </div>
+        <div class="control-group">
+            <label>偏振角 Polarizer (θ)</label>
+            <input type="range" id="angleSlider" min="0" max="180" value="0" step="5">
+            <div class="value-display" id="angleValue">0°</div>
+        </div>
+        <div class="control-group">
+            <label>条纹值 f_σ</label>
+            <input type="range" id="fringeSlider" min="5" max="20" value="10" step="1">
+            <div class="value-display" id="fringeValue">10 N/mm</div>
+        </div>
+        <div class="control-group">
+            <label>厚度 d</label>
+            <input type="range" id="thicknessSlider" min="5" max="20" value="10" step="1">
+            <div class="value-display" id="thicknessValue">10 mm</div>
+        </div>
+        <div class="stats">
+            <div class="stat-row">
+                <span class="stat-label">Max N:</span>
+                <span class="stat-value" id="maxN">0.0</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Center N:</span>
+                <span class="stat-value" id="centerN">0.0</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Free Edge N:</span>
+                <span class="stat-value" id="freeEdgeN">0.0</span>
+            </div>
+        </div>
+        <div class="copyright" id="copyright"></div>
+    </div>
+    <script>
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 0, 180);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(10, 20, 10);
+        scene.add(directionalLight);
+
+        let mode = 'circular';
+        let lightMode = 'mono';
+        let fieldMode = 'dark';
+        let load = 1000;
+        let angle = 0;
+        let fringeValue = 10;
+        let thickness = 10;
+        const R = 50;
+
+        function computeStress(x, y) {
+            const r = Math.sqrt(x*x + y*y);
+            if (r > R) return { principal_diff: 0, theta_p: 0 };
+
+            const P = load;
+            const d_ref = 10;
+
+            const r1 = Math.sqrt(x*x + (y - R)*(y - R)) + 0.5;
+            const r2 = Math.sqrt(x*x + (y + R)*(y + R)) + 0.5;
+            const theta1 = Math.atan2(y - R, x);
+            const theta2 = Math.atan2(y + R, x);
+
+            const sigma_r1 = -2*P/(Math.PI*d_ref) * Math.cos(theta1 + Math.PI/2) / r1;
+            const sigma_r2 = -2*P/(Math.PI*d_ref) * Math.cos(theta2 - Math.PI/2) / r2;
+
+            const c1 = Math.cos(theta1), s1 = Math.sin(theta1);
+            const c2 = Math.cos(theta2), s2 = Math.sin(theta2);
+
+            const sigma_x1 = sigma_r1 * c1 * c1;
+            const sigma_y1 = sigma_r1 * s1 * s1;
+            const tau_xy1 = sigma_r1 * s1 * c1;
+
+            const sigma_x2 = sigma_r2 * c2 * c2;
+            const sigma_y2 = sigma_r2 * s2 * s2;
+            const tau_xy2 = sigma_r2 * s2 * c2;
+
+            const uniform = P / (Math.PI * d_ref * R);
+            const sigma_x = sigma_x1 + sigma_x2 + uniform;
+            const sigma_y = sigma_y1 + sigma_y2 + uniform;
+            const tau_xy = tau_xy1 + tau_xy2;
+
+            const principal_diff = Math.sqrt((sigma_x - sigma_y)**2 + 4*tau_xy**2);
+            const theta_p = 0.5 * Math.atan2(2*tau_xy, sigma_x - sigma_y);
+
+            return { principal_diff, theta_p };
+        }
+
+        function createFringeTexture() {
+            const size = 512;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            const imageData = ctx.createImageData(size, size);
+            const data = imageData.data;
+
+            let maxN = 0;
+            let centerN = 0;
+            let freeEdgeN = 0;
+
+            for (let py = 0; py < size; py++) {
+                for (let px = 0; px < size; px++) {
+                    const x = (px - size/2) / (size/2) * R;
+                    const y = (size/2 - py) / (size/2) * R;
+                    const r = Math.sqrt(x*x + y*y);
+
+                    if (r > R - 1) {
+                        const idx = (py * size + px) * 4;
+                        data[idx + 3] = 0;
+                        continue;
+                    }
+
+                    const stress = computeStress(y, x);
+                    const N = stress.principal_diff * thickness / fringeValue;
+
+                    if (N > maxN) maxN = N;
+                    if (Math.abs(x) < 2 && Math.abs(y) < 2) centerN = N;
+                    if (Math.abs(x) < 2 && y > R - 5) freeEdgeN = N;
+
+                    let intensity;
+                    if (mode === 'circular') {
+                        if (fieldMode === 'dark') {
+                            intensity = Math.pow(Math.sin(Math.PI * N), 2);
+                        } else {
+                            intensity = Math.pow(Math.cos(Math.PI * N), 2);
+                        }
+                    } else {
+                        const alpha = angle * Math.PI / 180;
+                        const isoclinic = Math.pow(Math.sin(2 * (stress.theta_p - alpha)), 2);
+                        if (fieldMode === 'dark') {
+                            const isochromatic = Math.pow(Math.sin(Math.PI * N), 2);
+                            intensity = isoclinic * isochromatic;
+                        } else {
+                            const isochromatic = Math.pow(Math.cos(Math.PI * N), 2);
+                            intensity = isoclinic * isochromatic;
+                        }
+                    }
+
+                    let r_col, g_col, b_col;
+                    if (lightMode === 'mono') {
+                        const gray = Math.floor(intensity * 255);
+                        r_col = g_col = b_col = gray;
+                    } else {
+                        const N_base = N;
+                        const N_r = N_base * (700/550);
+                        const N_g = N_base;
+                        const N_b = N_base * (430/550);
+
+                        let I_r, I_g, I_b;
+                        if (mode === 'circular') {
+                            if (fieldMode === 'dark') {
+                                I_r = Math.pow(Math.sin(Math.PI * N_r), 2);
+                                I_g = Math.pow(Math.sin(Math.PI * N_g), 2);
+                                I_b = Math.pow(Math.sin(Math.PI * N_b), 2);
+                            } else {
+                                I_r = Math.pow(Math.cos(Math.PI * N_r), 2);
+                                I_g = Math.pow(Math.cos(Math.PI * N_g), 2);
+                                I_b = Math.pow(Math.cos(Math.PI * N_b), 2);
+                            }
+                        } else {
+                            const alpha = angle * Math.PI / 180;
+                            const isoclinic = Math.pow(Math.sin(2 * (stress.theta_p - alpha)), 2);
+                            if (fieldMode === 'dark') {
+                                I_r = isoclinic * Math.pow(Math.sin(Math.PI * N_r), 2);
+                                I_g = isoclinic * Math.pow(Math.sin(Math.PI * N_g), 2);
+                                I_b = isoclinic * Math.pow(Math.sin(Math.PI * N_b), 2);
+                            } else {
+                                I_r = isoclinic * Math.pow(Math.cos(Math.PI * N_r), 2);
+                                I_g = isoclinic * Math.pow(Math.cos(Math.PI * N_g), 2);
+                                I_b = isoclinic * Math.pow(Math.cos(Math.PI * N_b), 2);
+                            }
+                        }
+
+                        r_col = Math.floor(I_r * 255);
+                        g_col = Math.floor(I_g * 255);
+                        b_col = Math.floor(I_b * 255);
+                    }
+
+                    const idx = (py * size + px) * 4;
+                    data[idx] = r_col;
+                    data[idx + 1] = g_col;
+                    data[idx + 2] = b_col;
+                    data[idx + 3] = 255;
+                }
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+            document.getElementById('maxN').textContent = maxN.toFixed(2);
+            document.getElementById('centerN').textContent = centerN.toFixed(2);
+            document.getElementById('freeEdgeN').textContent = freeEdgeN.toFixed(2);
+
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        const diskGeometry = new THREE.CylinderGeometry(R, R, 2, 128, 1);
+        diskGeometry.rotateX(Math.PI / 2);
+
+        let diskMaterial = new THREE.MeshStandardMaterial({
+            map: createFringeTexture(),
+            transparent: true,
+            opacity: 0.95,
+            side: THREE.DoubleSide
+        });
+        const disk = new THREE.Mesh(diskGeometry, diskMaterial);
+        scene.add(disk);
+
+        const edgeGeometry = new THREE.TorusGeometry(R, 0.5, 16, 100);
+        const edgeMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        const edge = new THREE.Mesh(edgeGeometry, edgeMaterial);
+        scene.add(edge);
+
+        const arrowGeometry = new THREE.ConeGeometry(1.5, 4, 16);
+        const arrowMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+
+        const topArrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
+        topArrow.position.set(0, R + 5, 0);
+        topArrow.rotation.z = Math.PI;
+        scene.add(topArrow);
+
+        const bottomArrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
+        bottomArrow.position.set(0, -R - 5, 0);
+        scene.add(bottomArrow);
+
+        function updateFringes() {
+            diskMaterial.map = createFringeTexture();
+            diskMaterial.needsUpdate = true;
+        }
+
+        function setMode(newMode, clickedBtn) {
+            mode = newMode;
+            const polarToggle = document.querySelectorAll('.mode-toggle')[0];
+            polarToggle.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            clickedBtn.classList.add('active');
+            updateFringes();
+        }
+
+        function setLightMode(newLightMode) {
+            lightMode = newLightMode;
+            document.getElementById('monoBtn').classList.remove('active');
+            document.getElementById('whiteBtn').classList.remove('active');
+            if (newLightMode === 'mono') {
+                document.getElementById('monoBtn').classList.add('active');
+            } else {
+                document.getElementById('whiteBtn').classList.add('active');
+            }
+            updateFringes();
+        }
+
+        function setFieldMode(newFieldMode) {
+            fieldMode = newFieldMode;
+            document.getElementById('darkBtn').classList.remove('active');
+            document.getElementById('brightBtn').classList.remove('active');
+            if (newFieldMode === 'dark') {
+                document.getElementById('darkBtn').classList.add('active');
+            } else {
+                document.getElementById('brightBtn').classList.add('active');
+            }
+            updateFringes();
+        }
+
+        document.getElementById('loadSlider').addEventListener('input', function() {
+            load = parseInt(this.value);
+            document.getElementById('loadValue').textContent = load + ' N';
+            updateFringes();
+        });
+
+        document.getElementById('angleSlider').addEventListener('input', function() {
+            angle = parseInt(this.value);
+            document.getElementById('angleValue').textContent = angle + '°';
+            updateFringes();
+        });
+
+        document.getElementById('fringeSlider').addEventListener('input', function() {
+            fringeValue = parseInt(this.value);
+            document.getElementById('fringeValue').textContent = fringeValue + ' N/mm';
+            updateFringes();
+        });
+
+        document.getElementById('thicknessSlider').addEventListener('input', function() {
+            thickness = parseInt(this.value);
+            document.getElementById('thicknessValue').textContent = thickness + ' mm';
+            updateFringes();
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+        document.getElementById('polarToggle').querySelectorAll('.mode-btn').forEach(function(btn) { btn.addEventListener('click', function() { setMode(this.dataset.polar, this); }); });
+        document.getElementById('monoBtn').addEventListener('click', function() { setLightMode('mono'); });
+        document.getElementById('whiteBtn').addEventListener('click', function() { setLightMode('white'); });
+        document.getElementById('darkBtn').addEventListener('click', function() { setFieldMode('dark'); });
+        document.getElementById('brightBtn').addEventListener('click', function() { setFieldMode('bright'); });
+        document.getElementById('copyright').innerHTML = '© 上海交通大学 马少鹏<br>mashaopeng@sjtu.edu.cn';
+    </script>
+</body>
+</html>

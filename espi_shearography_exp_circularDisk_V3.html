@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>电子散斑干涉</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', sans-serif; overflow: hidden; background: #1a1a2e; }
+#main-wrap { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
+
+.instructions-panel {
+    position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
+    width: 210px; background: rgba(255,255,255,0.92);
+    padding: 14px 12px; border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.25);
+    font-size: 0.78em; color: #444; line-height: 1.6;
+}
+.instructions-panel h3 {
+    font-size: 0.9em; color: #333; margin-bottom: 8px;
+    border-bottom: 1px solid #ddd; padding-bottom: 6px;
+}
+.instructions-panel ol { margin: 0; padding-left: 16px; }
+.instructions-panel li { margin-bottom: 6px; }
+
+.controls-panel {
+    position: absolute; top: 16px; right: 16px; width: 270px;
+    background: rgba(255,255,255,0.95); padding: 14px 16px;
+    border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+h1 { font-size: 1.05em; color: #333; margin-bottom: 2px; text-align: center; }
+.subtitle { color: #666; font-size: 0.72em; margin-bottom: 10px; text-align: center; }
+.control-group { margin-bottom: 8px; }
+.control-group label { display: block; font-weight: 600; margin-bottom: 3px; color: #333; font-size: 0.78em; }
+input[type="range"] { width: 100%; height: 6px; border-radius: 3px; background: linear-gradient(90deg, #667eea, #764ba2); outline: none; -webkit-appearance: none; }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: white; border: 2px solid #667eea; cursor: pointer; }
+.value-display { text-align: right; font-size: 0.85em; color: #667eea; font-weight: bold; margin-top: 1px; }
+        .mode-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+.mode-btn { flex: 1; padding: 5px 2px; border: 2px solid #ddd; border-radius: 6px; cursor: pointer; font-weight: 600; background: white; font-size: 0.68em; line-height: 1.3; min-width: 0; }
+.mode-btn.active { background: #667eea; color: white; border-color: #667eea; }
+.stats { background: #f8f9fa; padding: 8px 10px; border-radius: 6px; margin-top: 8px; font-size: 0.78em; }
+.stat-row { display: flex; justify-content: space-between; margin-bottom: 3px; }
+.stat-label { color: #666; }
+.stat-value { color: #667eea; font-weight: bold; }
+    .copyright { margin-top: 10px; padding-top: 8px; border-top: 1px solid #ddd; text-align: center; font-size: 0.7em; color: #666; line-height: 1.5; }
+
+</style>
+</head>
+<body>
+<div id="main-wrap">
+    <canvas id="fringeCanvas" width="800" height="800"></canvas>
+</div>
+
+<div class="instructions-panel">
+    <h3>操作说明</h3>
+    <ol>
+        <li>拖拽参数滑块查看条纹变化</li>
+        <li>切换模式对比 ESPI 与剪切散斑</li>
+    </ol>
+</div>
+
+<div class="controls-panel">
+    <h1>电子散斑干涉</h1>
+    <p class="subtitle">对径受压圆盘</p>
+
+    <div class="mode-toggle">
+        <button class="mode-btn active" data-mode="espi_u">ESPI<br>uₓ</button>
+        <button class="mode-btn" data-mode="espi_v">ESPI<br>uᵧ</button>
+        <button class="mode-btn" data-mode="shear_ux">Shearography<br>∂uₓ/∂x</button>
+        <button class="mode-btn" data-mode="shear_uy">Shearography<br>∂uᵧ/∂x</button>
+    </div>
+
+    <div class="control-group">
+        <label>载荷 P</label>
+        <input type="range" id="force" min="500" max="8000" value="2000" step="100">
+        <div class="value-display" id="forceVal">2000 N</div>
+    </div>
+    <div class="control-group">
+        <label>弹性模量</label>
+        <input type="range" id="young" min="30" max="210" value="70" step="1">
+        <div class="value-display" id="eVal">70 GPa</div>
+    </div>
+    <div class="control-group">
+        <label>泊松比</label>
+        <input type="range" id="poisson" min="0.1" max="0.45" value="0.3" step="0.01">
+        <div class="value-display" id="nuVal">0.3</div>
+    </div>
+    <div class="control-group">
+        <label>激光波长</label>
+        <input type="range" id="lambda" min="400" max="700" value="632.8" step="0.1">
+        <div class="value-display" id="lambdaVal">632.8 nm</div>
+    </div>
+    <div class="control-group">
+        <label>剪切量</label>
+        <input type="range" id="shear" min="1" max="10" value="3" step="1">
+        <div class="value-display" id="shearVal">3 px</div>
+    </div>
+
+    <div class="copyright" id="copyright"></div>
+</div>
+
+<script>
+const N = 400;
+let params, sigma_x, sigma_y, tau_xy, eps_x, eps_y, ux, uy;
+let specklePhase, dphi;
+let currentMode = 'espi_u';
+let L, dx, dy, center, R2, insideMask;
+function getParams() {
+    return {
+        force: parseFloat(document.getElementById('force').value),
+        contact: 2,
+        radius: 0.05,
+        young: parseFloat(document.getElementById('young').value) * 1e9,
+        poisson: parseFloat(document.getElementById('poisson').value),
+        lambda: parseFloat(document.getElementById('lambda').value) * 1e-9,
+        theta: 30 * Math.PI / 180,
+        shear: parseInt(document.getElementById('shear').value),
+    };
+}
+
+function updateLabels() {
+    document.getElementById('forceVal').textContent = document.getElementById('force').value + ' N';
+    document.getElementById('eVal').textContent = document.getElementById('young').value + ' GPa';
+    document.getElementById('nuVal').textContent = document.getElementById('poisson').value;
+    document.getElementById('lambdaVal').textContent = document.getElementById('lambda').value + ' nm';
+    document.getElementById('shearVal').textContent = document.getElementById('shear').value + ' px';
+}
+
+['force','young','poisson','lambda','shear'].forEach(id => {
+    document.getElementById(id).addEventListener('input', () => { updateLabels(); recomputeAll(); });
+});
+
+document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentMode = btn.dataset.mode;
+        recomputeAll();
+    });
+});
+
+function computeField(p) {
+    const R = p.radius, P = p.force, E = p.young, nu = p.poisson, t = 0.01;
+    sigma_x = new Float64Array(N * N);
+    sigma_y = new Float64Array(N * N);
+    tau_xy = new Float64Array(N * N);
+    eps_x = new Float64Array(N * N);
+    eps_y = new Float64Array(N * N);
+    ux = new Float64Array(N * N);
+    uy = new Float64Array(N * N);
+    insideMask = new Uint8Array(N * N);
+    L = R * 1.15;
+    dx = 2 * L / N; dy = 2 * L / N;
+    center = Math.floor(N / 2); R2 = R * R;
+
+    // 接触分布：在上下极点附近圆弧上散布 M 个对径载荷对，抛物线权重（类 Hertz 接触压力）
+    const alphaDeg = p.contact;
+    let thetas = [0], weights = [1];
+    if (alphaDeg >= 0.1) {
+        const alpha = alphaDeg * Math.PI / 180, M = 9;
+        thetas = []; weights = [];
+        let wsum = 0;
+        for (let k = 0; k < M; k++) {
+            const th = -alpha + 2 * alpha * k / (M - 1);
+            const w = Math.sqrt(Math.max(0, 1 - (th / alpha) * (th / alpha)));
+            thetas.push(th); weights.push(w); wsum += w;
+        }
+        for (let k = 0; k < M; k++) weights[k] /= wsum;
+    }
+    const cosT = thetas.map(Math.cos), sinT = thetas.map(Math.sin);
+
+    const C = P / (Math.PI * R * t);
+    for (let j = 0; j < N; j++) {
+        for (let i = 0; i < N; i++) {
+            const idx = i + j * N;
+            const x = -L + i * dx, y = -L + j * dy;
+            if (x * x + y * y > R2) { sigma_x[idx] = sigma_y[idx] = tau_xy[idx] = eps_x[idx] = eps_y[idx] = 0; ux[idx] = uy[idx] = NaN; insideMask[idx] = 0; continue; }
+            insideMask[idx] = 1;
+            let sx = 0, sy = 0, txy = 0;
+            for (let k = 0; k < thetas.length; k++) {
+                const c = cosT[k], s = sinT[k];
+                const PkC = C * weights[k];            // Pk/(πRt)
+                const coefk = -2 * R * PkC;            // -2Pk/(πt)
+                // 全局 -> 局部坐标（该载荷对位于 (0, ±R)）
+                const xl = x * c - y * s;
+                const yl = x * s + y * c;
+                const a1 = R - yl, a2 = R + yl;
+                const r1_2 = xl * xl + a1 * a1 + 1e-9, r2_2 = xl * xl + a2 * a2 + 1e-9;
+                const r1_4 = r1_2 * r1_2, r2_4 = r2_2 * r2_2;
+                const sxl = coefk * xl * xl * a1 / r1_4 + coefk * xl * xl * a2 / r2_4 + PkC;
+                const syl = coefk * a1 * a1 * a1 / r1_4 + coefk * a2 * a2 * a2 / r2_4 + PkC;
+                const txl = coefk * a1 * a1 * xl / r1_4 - coefk * a2 * a2 * xl / r2_4;
+                // 局部 -> 全局应力张量旋转
+                sx += c * c * sxl + s * s * syl + 2 * s * c * txl;
+                sy += s * s * sxl + c * c * syl - 2 * s * c * txl;
+                txy += -s * c * (sxl - syl) + (c * c - s * s) * txl;
+            }
+            sigma_x[idx] = sx;
+            sigma_y[idx] = sy;
+            tau_xy[idx] = txy;
+            eps_x[idx] = (sigma_x[idx] - nu * sigma_y[idx]) / E;
+            eps_y[idx] = (sigma_y[idx] - nu * sigma_x[idx]) / E;
+        }
+    }
+    for (let j = 0; j < N; j++) {
+        let cum = 0, inDisk = (insideMask[center + j * N] === 1);
+        ux[center + j * N] = inDisk ? 0 : NaN;
+        for (let i = center + 1; i < N; i++) {
+            const idx = i + j * N, prevIdx = idx - 1;
+            inDisk = (insideMask[idx] === 1);
+            if (!inDisk) { ux[idx] = NaN; cum = 0; continue; }
+            if (insideMask[prevIdx] === 1) cum += (eps_x[prevIdx] + eps_x[idx]) * 0.5 * dx; else cum = 0;
+            ux[idx] = cum;
+        }
+        cum = 0;
+        for (let i = center - 1; i >= 0; i--) {
+            const idx = i + j * N, prevIdx = idx + 1;
+            inDisk = (insideMask[idx] === 1);
+            if (!inDisk) { ux[idx] = NaN; cum = 0; continue; }
+            if (insideMask[prevIdx] === 1) cum -= (eps_x[prevIdx] + eps_x[idx]) * 0.5 * dx; else cum = 0;
+            ux[idx] = cum;
+        }
+    }
+    for (let i = 0; i < N; i++) {
+        let cum = 0, inDisk = (insideMask[i + center * N] === 1);
+        uy[i + center * N] = inDisk ? 0 : NaN;
+        for (let j = center + 1; j < N; j++) {
+            const idx = i + j * N, prevIdx = i + (j - 1) * N;
+            inDisk = (insideMask[idx] === 1);
+            if (!inDisk) { uy[idx] = NaN; cum = 0; continue; }
+            if (insideMask[prevIdx] === 1) cum += (eps_y[prevIdx] + eps_y[idx]) * 0.5 * dy; else cum = 0;
+            uy[idx] = cum;
+        }
+        cum = 0;
+        for (let j = center - 1; j >= 0; j--) {
+            const idx = i + j * N, prevIdx = i + (j + 1) * N;
+            inDisk = (insideMask[idx] === 1);
+            if (!inDisk) { uy[idx] = NaN; cum = 0; continue; }
+            if (insideMask[prevIdx] === 1) cum -= (eps_y[prevIdx] + eps_y[idx]) * 0.5 * dy; else cum = 0;
+            uy[idx] = cum;
+        }
+    }
+}
+
+function generateSpeckle() {
+    // 显示分辨率散斑（固定一块大的，参数变化时保持不变，更像同一试件）
+    const S = 1024;
+    specklePhase = new Float64Array(S * S);
+    for (let i = 0; i < specklePhase.length; i++) specklePhase[i] = Math.random() * 2 * Math.PI;
+    specklePhase._size = S;
+}
+generateSpeckle();
+
+function computePhaseDiff(p) {
+    dphi = new Float64Array(N * N);
+    for (let j = 0; j < N; j++) {
+        for (let i = 0; i < N; i++) {
+            const idx = i + j * N;
+            if (isNaN(ux[idx])) { dphi[idx] = NaN; continue; }
+            let val = 0;
+            switch (currentMode) {
+                case 'espi_u':
+                    val = (4 * Math.PI / p.lambda) * ux[idx] * Math.sin(p.theta);
+                    break;
+                case 'espi_v':
+                    val = (4 * Math.PI / p.lambda) * uy[idx] * Math.sin(p.theta);
+                    break;
+                case 'shear_ux': {
+                    const si = Math.min(i + p.shear, N - 1), nidx = si + j * N;
+                    if (isNaN(ux[nidx])) { dphi[idx] = NaN; continue; }
+                    val = (4 * Math.PI / p.lambda) * (ux[nidx] - ux[idx]) * Math.sin(p.theta);
+                    break;
+                }
+                case 'shear_uy': {
+                    const si = Math.min(i + p.shear, N - 1), nidx = si + j * N;
+                    if (isNaN(uy[nidx])) { dphi[idx] = NaN; continue; }
+                    val = (4 * Math.PI / p.lambda) * (uy[nidx] - uy[idx]) * Math.sin(p.theta);
+                    break;
+                }
+            }
+            dphi[idx] = val;
+        }
+    }
+}
+
+function render() {
+    const canvas = document.getElementById('fringeCanvas');
+    const size = Math.min(window.innerWidth * 0.65, window.innerHeight * 0.85);
+    const dispN = Math.floor(size);
+    canvas.width = dispN; canvas.height = dispN;
+    const ctx = canvas.getContext('2d');
+
+    // 相位场双线性插值到显示分辨率；散斑颗粒在显示分辨率逐像素取（保持锐利）
+    const imgData = ctx.createImageData(dispN, dispN);
+    const data = imgData.data;
+    const scale = dispN / N;
+    const SS = specklePhase._size || 1024;
+
+    for (let y = 0; y < dispN; y++) {
+        const gy = (y + 0.5) / scale - 0.5;
+        const j0 = Math.floor(gy), fy = gy - j0;
+        for (let x = 0; x < dispN; x++) {
+            const gx = (x + 0.5) / scale - 0.5;
+            const i0 = Math.floor(gx), fx = gx - i0;
+            const pix = (x + y * dispN) * 4;
+
+            // 双线性插值 dphi（跳过无效点，权重归一）
+            let sum = 0, wsum = 0;
+            for (let c = 0; c < 4; c++) {
+                const ii = i0 + (c & 1), jj = j0 + (c >> 1);
+                if (ii < 0 || ii >= N || jj < 0 || jj >= N) continue;
+                const val = dphi[ii + jj * N];
+                if (!isFinite(val)) continue;
+                const w = ((c & 1) ? fx : 1 - fx) * ((c >> 1) ? fy : 1 - fy);
+                sum += val * w; wsum += w;
+            }
+
+            if (wsum < 0.5) {
+                data[pix] = 30; data[pix + 1] = 30; data[pix + 2] = 40; data[pix + 3] = 255;
+                continue;
+            }
+            const dp = sum / wsum;
+            const speckle = specklePhase[(y % SS) * SS + (x % SS)];
+            const fringeVal = Math.abs(Math.sin(dp / 2));
+            const noiseVal = Math.abs(Math.sin(speckle + dp / 2));
+            const noisyVal = 0.7 * noiseVal * fringeVal + 0.3 * fringeVal;
+            const v = Math.floor(Math.max(0, Math.min(1, noisyVal)) * 255);
+            data[pix] = v; data[pix + 1] = v; data[pix + 2] = v; data[pix + 3] = 255;
+        }
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+
+    // Disk outline and arrows (vector)
+    const r = params.radius / (2 * L) * dispN;
+    const cxc = dispN / 2, cyc = dispN / 2;
+    ctx.beginPath();
+    ctx.arc(cxc, cyc, r, 0, 2 * Math.PI);
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,200,100,0.7)';
+    ctx.font = Math.floor(dispN / 55) + 'px sans-serif';
+    // Top arrow: points DOWN into disk (compression)
+    ctx.beginPath(); ctx.moveTo(cxc, cyc - r + 4);
+    ctx.lineTo(cxc - 8, cyc - r - 16); ctx.lineTo(cxc + 8, cyc - r - 16); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText('P', cxc - 18, cyc - r - 22);
+    // Bottom arrow: points UP into disk (compression)
+    ctx.fillStyle = 'rgba(255,200,100,0.7)';
+    ctx.beginPath(); ctx.moveTo(cxc, cyc + r - 4);
+    ctx.lineTo(cxc - 8, cyc + r + 16); ctx.lineTo(cxc + 8, cyc + r + 16); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText('P', cxc - 18, cyc + r + 22);
+}
+
+let computeTimeout;
+function recomputeAll() {
+    clearTimeout(computeTimeout);
+    computeTimeout = setTimeout(() => {
+        try {
+            params = getParams();
+            computeField(params);
+            computePhaseDiff(params);
+            render();
+        } catch (e) { console.error('Error:', e); }
+    }, 150);
+}
+
+function init() {
+    updateLabels();
+    params = getParams();
+    computeField(params);
+    computePhaseDiff(params);
+    render();
+}
+
+window.addEventListener('resize', () => { if (dphi) render(); });
+document.addEventListener('DOMContentLoaded', () => setTimeout(init, 100));
+document.getElementById('copyright').innerHTML = '© 上海交通大学 马少鹏<br>mashaopeng@sjtu.edu.cn';
+</script>
+</body>
+</html>
